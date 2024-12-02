@@ -3,8 +3,8 @@ export const config = {
         UserPoolId: 'ap-south-1_q5k72bACv',
         ClientId: '7q8kiupti9mbmtk42b3o0vlgu',
         Region: 'ap-south-1',
-        Domain: 'minecraft', // Cognito domain prefix
-        RedirectUri: window.location.origin, // The Amplify URL
+        Domain: 'minecraft.auth.ap-south-1.amazoncognito.com', // Full Cognito domain
+        RedirectUri: 'https://frontend.daeohx4b9wc45.amplifyapp.com', // Amplify URL without trailing slash
         ResponseType: 'token'
     },
     api: {

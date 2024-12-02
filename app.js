@@ -75,7 +75,7 @@ function showServerControls() {
 
 // Redirect to Cognito login
 function login() {
-    const cognitoDomain = `https://${config.cognito.Domain}.auth.${config.cognito.Region}.amazoncognito.com`;
+    const cognitoDomain = `https://${config.cognito.Domain}`;
     const queryParams = new URLSearchParams({
         client_id: config.cognito.ClientId,
         response_type: config.cognito.ResponseType,
