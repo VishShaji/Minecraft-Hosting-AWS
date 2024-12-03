@@ -101,6 +101,12 @@ function logout() {
 // API calls with authentication
 async function makeAuthenticatedRequest(endpoint, method = 'GET') {
     try {
+        if (!idToken) {
+            throw new Error('No authentication token found. Please login again.');
+        }
+
+        console.log(`Making ${method} request to: ${config.api.baseUrl}${endpoint}`);
+        
         const response = await fetch(`${config.api.baseUrl}${endpoint}`, {
             method: method,
             headers: {
@@ -111,57 +117,66 @@ async function makeAuthenticatedRequest(endpoint, method = 'GET') {
         
         if (!response.ok) {
             if (response.status === 401) {
-                // Token expired or invalid
                 sessionStorage.removeItem('idToken');
                 showLoginButton();
                 throw new Error('Authentication expired. Please login again.');
             }
-            throw new Error(`HTTP error! status: ${response.status}`);
+            const errorText = await response.text();
+            console.error('API Error:', {
+                status: response.status,
+                statusText: response.statusText,
+                body: errorText
+            });
+            throw new Error(`API Error: ${response.status} - ${errorText || response.statusText}`);
         }
         
-        return await response.json();
+        const data = await response.json();
+        console.log('API Response:', data);
+        return data;
     } catch (error) {
-        console.error('API request failed:', error);
-        return { error: error.message || 'Failed to communicate with server' };
+        console.error('Request failed:', error);
+        throw error;
     }
 }
 
 // Server management functions
 async function updateServerStatus() {
-    const result = await makeAuthenticatedRequest(config.api.endpoints.status);
-    const statusMessage = document.getElementById('status-message');
-    const statusIndicator = document.getElementById('statusIndicator');
-    const ipAddress = document.getElementById('ip-address');
-    const startBtn = document.getElementById('start-btn');
-    const stopBtn = document.getElementById('stop-btn');
+    try {
+        const result = await makeAuthenticatedRequest(config.api.endpoints.status);
+        const statusMessage = document.getElementById('status-message');
+        const statusIndicator = document.getElementById('statusIndicator');
+        const ipAddress = document.getElementById('ip-address');
+        const startBtn = document.getElementById('start-btn');
+        const stopBtn = document.getElementById('stop-btn');
 
-    if (result.error) {
-        statusMessage.textContent = `Error: ${result.error}`;
-        statusIndicator.className = 'status-indicator';
+        statusMessage.textContent = `Server is ${result.status}`;
+        statusIndicator.className = `status-indicator ${result.status === 'RUNNING' ? 'status-running' : 'status-stopped'}`;
+        
+        if (result.ip_address) {
+            ipAddress.innerHTML = `
+                <div class="input-group">
+                    <input type="text" class="form-control" value="${result.ip_address}:25565" readonly>
+                    <button class="btn btn-outline-secondary" onclick="copyToClipboard('${result.ip_address}:25565')">
+                        Copy
+                    </button>
+                </div>`;
+        } else {
+            ipAddress.textContent = '';
+        }
+
+        startBtn.disabled = result.status === 'RUNNING';
+        stopBtn.disabled = result.status !== 'RUNNING';
+    } catch (error) {
+        const statusMessage = document.getElementById('status-message');
+        const ipAddress = document.getElementById('ip-address');
+        const startBtn = document.getElementById('start-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        
+        statusMessage.textContent = `Error: ${error.message}`;
         ipAddress.textContent = '';
-        startBtn.disabled = true;
+        startBtn.disabled = false;
         stopBtn.disabled = true;
-        return;
     }
-
-    statusMessage.textContent = `Server is ${result.status}`;
-    statusIndicator.className = `status-indicator ${result.status === 'RUNNING' ? 'status-running' : 'status-stopped'}`;
-    
-    if (result.ip_address) {
-        ipAddress.innerHTML = `
-            <div class="input-group">
-                <input type="text" class="form-control" value="${result.ip_address}:25565" readonly>
-                <button class="btn btn-outline-secondary" onclick="copyToClipboard('${result.ip_address}:25565')">
-                    Copy
-                </button>
-            </div>`;
-    } else {
-        ipAddress.textContent = '';
-    }
-
-    // Update buttons based on server status
-    startBtn.disabled = result.status === 'RUNNING';
-    stopBtn.disabled = result.status !== 'RUNNING';
 }
 
 async function startServer() {
