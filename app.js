@@ -1,6 +1,7 @@
 import config from './config.js';
 
 let idToken = null;
+let serverStarted = false; // Track if the server has been started
 
 // Parse token from URL or sessionStorage
 function getTokenFromUrl() {
@@ -56,6 +57,7 @@ function showServerControls() {
                     <div class="btn-group">
                         <button onclick="startServer()" id="start-btn" class="btn btn-success" disabled>Start Server</button>
                         <button onclick="stopServer()" id="stop-btn" class="btn btn-danger" disabled>Stop Server</button>
+                        <button onclick="deleteServer()" id="delete-btn" class="btn btn-warning" disabled>Delete Server</button>
                     </div>
                 </div>
             </div>
@@ -71,7 +73,7 @@ function login() {
     const queryParams = new URLSearchParams({
         client_id: config.cognito.ClientId,
         response_type: config.cognito.ResponseType,
-        scope: 'email openid',
+        scope: 'openid',
         redirect_uri: config.cognito.RedirectUri
     });
     window.location.href = `${cognitoDomain}/login?${queryParams.toString()}`;
@@ -125,14 +127,29 @@ async function updateServerStatus() {
         const result = await makeAuthenticatedRequest(config.api.endpoints.status);
         document.getElementById('status-message').textContent = `Server is ${result.status}`;
         document.getElementById('statusIndicator').className = `status-indicator ${result.status === 'RUNNING' ? 'status-running' : 'status-stopped'}`;
+        
+        // Update IP address display
         document.getElementById('ip-address').innerHTML = result.ip_address
             ? `<div class="input-group">
                     <input type="text" class="form-control" value="${result.ip_address}:25565" readonly>
                     <button class="btn btn-outline-secondary" onclick="copyToClipboard('${result.ip_address}:25565')">Copy</button>
                </div>`
             : '';
+
+        // Enable/disable buttons based on server status
         document.getElementById('start-btn').disabled = result.status === 'RUNNING';
         document.getElementById('stop-btn').disabled = result.status !== 'RUNNING';
+        
+        // Enable delete button only if server has been started at least once
+        if (result.status === 'RUNNING') {
+            serverStarted = true; // Mark that the server has been started at least once
+            document.getElementById('delete-btn').disabled = false; // Enable delete button
+        } else if (serverStarted) {
+            document.getElementById('delete-btn').disabled = false; // Keep delete button enabled if server was started before
+        } else {
+            document.getElementById('delete-btn').disabled = true; // Disable delete button if never started
+        }
+
     } catch (error) {
         document.getElementById('status-message').textContent = `Error: ${error.message}`;
         document.getElementById('start-btn').disabled = false;
@@ -145,7 +162,9 @@ async function startServer() {
     try {
         document.getElementById('start-btn').disabled = true;
         document.getElementById('status-message').textContent = 'Starting server...';
+        
         await makeAuthenticatedRequest(config.api.endpoints.start, 'POST');
+        
         updateServerStatus();
     } catch (error) {
         document.getElementById('status-message').textContent = `Error: ${error.message}`;
@@ -158,7 +177,9 @@ async function stopServer() {
     try {
         document.getElementById('stop-btn').disabled = true;
         document.getElementById('status-message').textContent = 'Stopping server...';
+        
         await makeAuthenticatedRequest(config.api.endpoints.stop, 'POST');
+        
         updateServerStatus();
     } catch (error) {
         document.getElementById('status-message').textContent = `Error: ${error.message}`;
@@ -166,16 +187,45 @@ async function stopServer() {
     }
 }
 
+// Delete server
+async function deleteServer() {
+    try {
+        const confirmDelete = confirm("Are you sure you want to delete the server?");
+        
+        if (confirmDelete) {
+            document.getElementById('delete-btn').disabled = true;
+            document.getElementById('status-message').textContent = 'Deleting server...';
+            
+            await makeAuthenticatedRequest(config.api.endpoints.delete, 'DELETE'); // Make DELETE request
+            
+            // Reset UI after deletion
+            serverStarted = false; // Reset the flag as the server has been deleted
+            updateServerStatus(); // Refresh status after deletion
+            alert("Server deleted successfully.");
+            
+            // Optionally, disable delete button after deletion until next start.
+            document.getElementById('delete-btn').disabled = true; 
+            
+            // You might want to refresh or redirect here depending on your app's flow.
+            
+       }
+       
+   } catch (error) {
+       document.getElementById('status-message').textContent = `Error: ${error.message}`;
+       document.getElementById('delete-btn').disabled = false; 
+   }
+}
+
 // Copy to clipboard
 function copyToClipboard(text) {
     navigator.clipboard.writeText(text).then(() => {
-        const button = document.querySelector('.input-group .btn');
-        const originalText = button.textContent;
-        button.textContent = 'Copied!';
-        setTimeout(() => {
-            button.textContent = originalText;
-        }, 2000);
-    }).catch(err => console.error('Failed to copy:', err));
+         const button = document.querySelector('.input-group .btn');
+         const originalText = button.textContent;
+         button.textContent = 'Copied!';
+         setTimeout(() => {
+             button.textContent = originalText;
+         }, 2000);
+     }).catch(err => console.error('Failed to copy:', err));
 }
 
 // Initialize app on load
@@ -186,4 +236,5 @@ window.login = login;
 window.logout = logout;
 window.startServer = startServer;
 window.stopServer = stopServer;
+window.deleteServer = deleteServer; // Export delete function for global access
 window.copyToClipboard = copyToClipboard;
