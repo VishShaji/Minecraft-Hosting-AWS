@@ -1,32 +1,25 @@
 import config from './config.js';
 
-// Handle authentication and server management
 let idToken = null;
 
-// Check if we have a token in the URL (after Cognito redirect)
+// Parse token from URL or sessionStorage
 function getTokenFromUrl() {
     const hash = window.location.hash.substring(1);
     const params = new URLSearchParams(hash);
     const token = params.get('id_token');
     if (token) {
-        // Store token in sessionStorage
         sessionStorage.setItem('idToken', token);
         return token;
     }
-    // Check sessionStorage if no token in URL
     return sessionStorage.getItem('idToken');
 }
 
-// Initialize the application
+// Initialize application
 function initApp() {
-    // Check for token
     const token = getTokenFromUrl();
     if (token) {
         idToken = token;
-        // Clear the URL hash if token was there
-        if (window.location.hash) {
-            window.history.replaceState(null, null, window.location.pathname);
-        }
+        window.history.replaceState(null, null, window.location.pathname); // Clean URL
         showServerControls();
     } else {
         showLoginButton();
@@ -69,8 +62,7 @@ function showServerControls() {
         </div>
     `;
     updateServerStatus();
-    // Set up periodic status check
-    setInterval(updateServerStatus, 30000);
+    setInterval(updateServerStatus, 30000); // Poll every 30 seconds
 }
 
 // Redirect to Cognito login
@@ -87,7 +79,6 @@ function login() {
 
 // Handle logout
 function logout() {
-    // Clear token from sessionStorage
     sessionStorage.removeItem('idToken');
     idToken = null;
     const cognitoDomain = `https://${config.cognito.Domain}.auth.${config.cognito.Region}.amazoncognito.com`;
@@ -98,23 +89,19 @@ function logout() {
     window.location.href = `${cognitoDomain}/logout?${queryParams.toString()}`;
 }
 
-// API calls with authentication
+// Make authenticated requests
 async function makeAuthenticatedRequest(endpoint, method = 'GET') {
     try {
-        if (!idToken) {
-            throw new Error('No authentication token found. Please login again.');
-        }
+        if (!idToken) throw new Error('No authentication token found. Please login.');
 
-        console.log(`Making ${method} request to: ${config.api.baseUrl}${endpoint}`);
-        
         const response = await fetch(`${config.api.baseUrl}${endpoint}`, {
             method: method,
             headers: {
-                'Authorization': `Bearer ${idToken}`,
+                Authorization: `Bearer ${idToken}`,
                 'Content-Type': 'application/json'
             }
         });
-        
+
         if (!response.ok) {
             if (response.status === 401) {
                 sessionStorage.removeItem('idToken');
@@ -122,117 +109,81 @@ async function makeAuthenticatedRequest(endpoint, method = 'GET') {
                 throw new Error('Authentication expired. Please login again.');
             }
             const errorText = await response.text();
-            console.error('API Error:', {
-                status: response.status,
-                statusText: response.statusText,
-                body: errorText
-            });
-            throw new Error(`API Error: ${response.status} - ${errorText || response.statusText}`);
+            throw new Error(`API Error: ${response.status} - ${errorText}`);
         }
-        
-        const data = await response.json();
-        console.log('API Response:', data);
-        return data;
+
+        return await response.json();
     } catch (error) {
-        console.error('Request failed:', error);
+        console.error(error.message);
         throw error;
     }
 }
 
-// Server management functions
+// Update server status
 async function updateServerStatus() {
     try {
         const result = await makeAuthenticatedRequest(config.api.endpoints.status);
-        const statusMessage = document.getElementById('status-message');
-        const statusIndicator = document.getElementById('statusIndicator');
-        const ipAddress = document.getElementById('ip-address');
-        const startBtn = document.getElementById('start-btn');
-        const stopBtn = document.getElementById('stop-btn');
-
-        statusMessage.textContent = `Server is ${result.status}`;
-        statusIndicator.className = `status-indicator ${result.status === 'RUNNING' ? 'status-running' : 'status-stopped'}`;
-        
-        if (result.ip_address) {
-            ipAddress.innerHTML = `
-                <div class="input-group">
+        document.getElementById('status-message').textContent = `Server is ${result.status}`;
+        document.getElementById('statusIndicator').className = `status-indicator ${result.status === 'RUNNING' ? 'status-running' : 'status-stopped'}`;
+        document.getElementById('ip-address').innerHTML = result.ip_address
+            ? `<div class="input-group">
                     <input type="text" class="form-control" value="${result.ip_address}:25565" readonly>
-                    <button class="btn btn-outline-secondary" onclick="copyToClipboard('${result.ip_address}:25565')">
-                        Copy
-                    </button>
-                </div>`;
-        } else {
-            ipAddress.textContent = '';
-        }
-
-        startBtn.disabled = result.status === 'RUNNING';
-        stopBtn.disabled = result.status !== 'RUNNING';
+                    <button class="btn btn-outline-secondary" onclick="copyToClipboard('${result.ip_address}:25565')">Copy</button>
+               </div>`
+            : '';
+        document.getElementById('start-btn').disabled = result.status === 'RUNNING';
+        document.getElementById('stop-btn').disabled = result.status !== 'RUNNING';
     } catch (error) {
-        const statusMessage = document.getElementById('status-message');
-        const ipAddress = document.getElementById('ip-address');
-        const startBtn = document.getElementById('start-btn');
-        const stopBtn = document.getElementById('stop-btn');
-        
-        statusMessage.textContent = `Error: ${error.message}`;
-        ipAddress.textContent = '';
-        startBtn.disabled = false;
-        stopBtn.disabled = true;
+        document.getElementById('status-message').textContent = `Error: ${error.message}`;
+        document.getElementById('start-btn').disabled = false;
+        document.getElementById('stop-btn').disabled = true;
     }
 }
 
+// Start server
 async function startServer() {
-    const startBtn = document.getElementById('start-btn');
-    const statusMessage = document.getElementById('status-message');
-    
-    startBtn.disabled = true;
-    statusMessage.textContent = 'Starting server...';
-    
-    const result = await makeAuthenticatedRequest(config.api.endpoints.start, 'POST');
-    if (result.error) {
-        statusMessage.textContent = `Error: ${result.error}`;
-        startBtn.disabled = false;
-        return;
+    try {
+        document.getElementById('start-btn').disabled = true;
+        document.getElementById('status-message').textContent = 'Starting server...';
+        await makeAuthenticatedRequest(config.api.endpoints.start, 'POST');
+        updateServerStatus();
+    } catch (error) {
+        document.getElementById('status-message').textContent = `Error: ${error.message}`;
+        document.getElementById('start-btn').disabled = false;
     }
-    
-    updateServerStatus();
 }
 
+// Stop server
 async function stopServer() {
-    const stopBtn = document.getElementById('stop-btn');
-    const statusMessage = document.getElementById('status-message');
-    
-    stopBtn.disabled = true;
-    statusMessage.textContent = 'Stopping server...';
-    
-    const result = await makeAuthenticatedRequest(config.api.endpoints.stop, 'POST');
-    if (result.error) {
-        statusMessage.textContent = `Error: ${result.error}`;
-        stopBtn.disabled = false;
-        return;
+    try {
+        document.getElementById('stop-btn').disabled = true;
+        document.getElementById('status-message').textContent = 'Stopping server...';
+        await makeAuthenticatedRequest(config.api.endpoints.stop, 'POST');
+        updateServerStatus();
+    } catch (error) {
+        document.getElementById('status-message').textContent = `Error: ${error.message}`;
+        document.getElementById('stop-btn').disabled = false;
     }
-    
-    updateServerStatus();
 }
 
-// Utility function to copy server address
+// Copy to clipboard
 function copyToClipboard(text) {
-    navigator.clipboard.writeText(text)
-        .then(() => {
-            const button = document.querySelector('.input-group .btn');
-            const originalText = button.textContent;
-            button.textContent = 'Copied!';
-            setTimeout(() => {
-                button.textContent = originalText;
-            }, 2000);
-        })
-        .catch(err => console.error('Failed to copy:', err));
+    navigator.clipboard.writeText(text).then(() => {
+        const button = document.querySelector('.input-group .btn');
+        const originalText = button.textContent;
+        button.textContent = 'Copied!';
+        setTimeout(() => {
+            button.textContent = originalText;
+        }, 2000);
+    }).catch(err => console.error('Failed to copy:', err));
 }
 
-// Make functions available globally
+// Initialize app on load
+window.onload = initApp;
+
+// Export global functions
 window.login = login;
 window.logout = logout;
 window.startServer = startServer;
 window.stopServer = stopServer;
 window.copyToClipboard = copyToClipboard;
-
-// Initialize the app when the page loads
-window.onload = initApp;
