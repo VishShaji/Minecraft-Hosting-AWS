@@ -71,12 +71,11 @@ function login() {
     const queryParams = new URLSearchParams({
         client_id: config.cognito.ClientId,
         response_type: config.cognito.ResponseType,
-        scope: 'openid email',
+        scope: 'email openid',
         redirect_uri: config.cognito.RedirectUri
     });
-    window.location.href = `${cognitoDomain}/oauth2/authorize?${queryParams.toString()}`;
+    window.location.href = `${cognitoDomain}/login?${queryParams.toString()}`;
 }
-
 
 // Handle logout
 function logout() {
