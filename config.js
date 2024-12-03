@@ -1,7 +1,7 @@
 export const config = {
     cognito: {
-        UserPoolId: 'ap-south-1_q5k72bACv',
-        ClientId: '7q8kiupti9mbmtk42b3o0vlgu',
+        UserPoolId: 'ap-south-1_pHPaoBEVN',
+        ClientId: '4iffruad2h6bdvl3rv2aeofpl0',
         Region: 'ap-south-1',
         Domain: 'minecraft-server-manager', // Just the domain prefix
         RedirectUri: 'https://frontend.daeohx4b9wc45.amplifyapp.com', // Amplify URL without trailing slash
