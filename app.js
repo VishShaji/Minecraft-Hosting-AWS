@@ -74,7 +74,7 @@ function login() {
         scope: 'openid email',
         redirect_uri: config.cognito.RedirectUri
     });
-    window.location.href = `${cognitoDomain}/login?${queryParams.toString()}`;
+    window.location.href = `${cognitoDomain}/oauth2/authorize?${queryParams.toString()}`;
 }
 
 
