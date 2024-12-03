@@ -5,7 +5,7 @@ export const config = {
         Region: 'ap-south-1',
         Domain: 'minecraft-server-manager', // Just the domain prefix
         RedirectUri: 'https://frontend.daeohx4b9wc45.amplifyapp.com', // Amplify URL without trailing slash
-        ResponseType: 'token id_token'  // Request both token types
+        ResponseType: 'id_token token'  // Request both token types
     },
     api: {
         baseUrl: 'https://p4lx4rz6ik.execute-api.ap-south-1.amazonaws.com/prod',
