@@ -12,7 +12,8 @@ export const config = {
         endpoints: {
             status: '/server-status',
             start: '/start-server',
-            stop: '/stop-server'
+            stop: '/stop-server',
+            delete: '/delete-server'
         }
     }
 };
