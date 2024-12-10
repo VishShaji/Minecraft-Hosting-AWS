@@ -2,7 +2,9 @@ import config from './config.js';
 
 let idToken = null;
 
-// Helper: Parse token from URL or sessionStorage
+// Helper Functions
+
+// Parse token from URL or sessionStorage
 function getTokenFromUrl() {
     const hash = window.location.hash.substring(1);
     const params = new URLSearchParams(hash);
@@ -14,7 +16,7 @@ function getTokenFromUrl() {
     return sessionStorage.getItem('idToken');
 }
 
-// Helper: Check if the token is expired
+// Check if the token is expired
 function isTokenExpired(token) {
     try {
         const payload = JSON.parse(atob(token.split('.')[1]));
@@ -26,24 +28,31 @@ function isTokenExpired(token) {
     }
 }
 
-// Initialize the app
-function initApp() {
-    console.log("Initializing app...");
-    const token = getTokenFromUrl();
-    console.log("Retrieved token:", token);
-
-    if (token && !isTokenExpired(token)) {
-        idToken = token;
-        console.log("Token is valid.");
-        window.history.replaceState(null, null, window.location.pathname); // Clean URL
-        showServerControls();
-    } else {
-        console.warn("Token missing or expired.");
-        showLoginButton();
+// Handle API requests with authentication
+async function makeAuthenticatedRequest(endpoint, method = 'GET') {
+    if (!idToken || isTokenExpired(idToken)) {
+        throw new Error('Authentication expired. Please login again.');
     }
+
+    const response = await fetch(`${config.api.baseUrl}${endpoint}`, {
+        method,
+        headers: {
+            Authorization: `Bearer ${idToken}`,
+            'Content-Type': 'application/json',
+        },
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`API Error: ${response.status} - ${errorText}`);
+    }
+
+    return response;
 }
 
-// Display login button
+// UI Rendering Functions
+
+// Show login button
 function showLoginButton() {
     document.getElementById('content').innerHTML = `
         <div class="container mt-5 text-center">
@@ -54,13 +63,12 @@ function showLoginButton() {
     `;
 }
 
-// Display server controls
+// Show user information and server controls
 async function showServerControls() {
     try {
-        console.log("Fetching user info...");
         const userResponse = await makeAuthenticatedRequest('/user-info');
         const userData = await userResponse.json();
-        
+
         document.getElementById('content').innerHTML = `
             <div class="container mt-5">
                 <div class="d-flex justify-content-between align-items-center mb-4">
@@ -70,161 +78,118 @@ async function showServerControls() {
                 <div class="card mb-4">
                     <div class="card-body">
                         <h5 class="card-title">User Information</h5>
-                        <p class="card-text">Email: ${userData.email}</p>
-                        <p class="card-text">Instance Name: ${userData.instance_name}</p>
+                        <p>Email: ${userData.email}</p>
+                        <p>Instance Name: ${userData.instance_name}</p>
                     </div>
                 </div>
                 <div class="card">
                     <div class="card-body">
                         <h5 class="card-title">Server Status</h5>
-                        <div class="d-flex align-items-center mb-3">
-                            <span class="status-indicator" id="statusIndicator"></span>
-                            <p id="status-message" class="card-text mb-0">Checking status...</p>
-                        </div>
-                        <p id="ip-address" class="card-text mb-3"></p>
+                        <p id="status-message" class="mb-3">Checking status...</p>
                         <div class="btn-group">
-                            <button onclick="startServer()" id="start-btn" class="btn btn-success" disabled>Start Server</button>
-                            <button onclick="stopServer()" id="stop-btn" class="btn btn-danger" disabled>Stop Server</button>
+                            <button onclick="startServer()" id="start-btn" class="btn btn-success" disabled>Start</button>
+                            <button onclick="stopServer()" id="stop-btn" class="btn btn-danger" disabled>Stop</button>
                         </div>
                     </div>
                 </div>
             </div>
         `;
         updateServerStatus();
-        setInterval(updateServerStatus, 30000); // Poll every 30 seconds
+        setInterval(updateServerStatus, 30000); // Poll server status every 30 seconds
     } catch (error) {
-        console.error('Error loading user info:', error);
+        console.error('Error fetching user info:', error);
         document.getElementById('content').innerHTML = `
             <div class="container mt-5">
-                <div class="alert alert-danger">Error loading user information. Please try logging in again.</div>
-                <button onclick="logout()" class="btn btn-primary">Back to Login</button>
+                <div class="alert alert-danger">Failed to load user information. Please try logging in again.</div>
+                <button onclick="logout()" class="btn btn-primary">Login Again</button>
             </div>
         `;
     }
 }
 
-// Redirect to Cognito login
-function login() {
-    const cognitoDomain = `https://${config.cognito.Domain}.auth.${config.cognito.Region}.amazoncognito.com`;
-    const queryParams = new URLSearchParams({
-        client_id: config.cognito.ClientId,
-        response_type: config.cognito.ResponseType,
-        scope: 'email openid',
-        redirect_uri: config.cognito.RedirectUri
-    });
-    window.location.href = `${cognitoDomain}/login?${queryParams.toString()}`;
-}
+// Server Actions
 
-// Handle logout
-function logout() {
-    sessionStorage.removeItem('idToken');
-    idToken = null;
-    const cognitoDomain = `https://${config.cognito.Domain}.auth.${config.cognito.Region}.amazoncognito.com`;
-    const queryParams = new URLSearchParams({
-        client_id: config.cognito.ClientId,
-        logout_uri: config.cognito.RedirectUri
-    });
-    window.location.href = `${cognitoDomain}/logout?${queryParams.toString()}`;
-}
-
-// Make authenticated requests
-async function makeAuthenticatedRequest(endpoint, method = 'GET') {
-    console.log("Making authenticated request to:", endpoint);
-    try {
-        if (!idToken || isTokenExpired(idToken)) {
-            throw new Error('Authentication expired. Please login again.');
-        }
-
-        const response = await fetch(`${config.api.baseUrl}${endpoint}`, {
-            method: method,
-            headers: {
-                Authorization: `Bearer ${idToken}`,
-                'Content-Type': 'application/json'
-            }
-        });
-
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`API Error: ${response.status} - ${errorText}`);
-        }
-
-        return response;
-    } catch (error) {
-        console.error("Request failed:", error.message);
-        throw error;
-    }
-}
-
-// Update server status
+// Fetch and update server status
 async function updateServerStatus() {
     try {
-        const result = await makeAuthenticatedRequest(config.api.endpoints.status);
-        const serverData = await result.json();
-        document.getElementById('status-message').textContent = `Server is ${serverData.status}`;
-        document.getElementById('statusIndicator').className = `status-indicator ${serverData.status === 'RUNNING' ? 'status-running' : 'status-stopped'}`;
-        document.getElementById('ip-address').innerHTML = serverData.ip_address
-            ? `<div class="input-group">
-                    <input type="text" class="form-control" value="${serverData.ip_address}:25565" readonly>
-                    <button class="btn btn-outline-secondary" onclick="copyToClipboard('${serverData.ip_address}:25565')">Copy</button>
-               </div>`
-            : '';
-        document.getElementById('start-btn').disabled = serverData.status === 'RUNNING';
-        document.getElementById('stop-btn').disabled = serverData.status !== 'RUNNING';
+        const response = await makeAuthenticatedRequest(config.api.endpoints.status);
+        const { status } = await response.json();
+
+        const statusMessage = status === 'RUNNING' ? 'Server is running' : 'Server is stopped';
+        document.getElementById('status-message').textContent = statusMessage;
+
+        document.getElementById('start-btn').disabled = status === 'RUNNING';
+        document.getElementById('stop-btn').disabled = status !== 'RUNNING';
     } catch (error) {
-        document.getElementById('status-message').textContent = `Error: ${error.message}`;
-        document.getElementById('start-btn').disabled = false;
-        document.getElementById('stop-btn').disabled = true;
+        console.error('Error updating server status:', error);
     }
 }
 
 // Start server
 async function startServer() {
-    console.log("Start Server function called!");
     try {
         document.getElementById('start-btn').disabled = true;
         document.getElementById('status-message').textContent = 'Starting server...';
         await makeAuthenticatedRequest(config.api.endpoints.start, 'POST');
         updateServerStatus();
     } catch (error) {
-        console.error("Error starting server:", error);
-        document.getElementById('status-message').textContent = `Error: ${error.message}`;
-        document.getElementById('start-btn').disabled = false;
+        console.error('Error starting server:', error);
     }
 }
 
 // Stop server
 async function stopServer() {
-    console.log("Stop Server function called!");
     try {
         document.getElementById('stop-btn').disabled = true;
         document.getElementById('status-message').textContent = 'Stopping server...';
         await makeAuthenticatedRequest(config.api.endpoints.stop, 'POST');
         updateServerStatus();
     } catch (error) {
-        console.error("Error stopping server:", error);
-        document.getElementById('status-message').textContent = `Error: ${error.message}`;
-        document.getElementById('stop-btn').disabled = false;
+        console.error('Error stopping server:', error);
     }
 }
 
-// Copy to clipboard
-function copyToClipboard(text) {
-    navigator.clipboard.writeText(text).then(() => {
-        const button = document.querySelector('.input-group .btn');
-        const originalText = button.textContent;
-        button.textContent = 'Copied!';
-        setTimeout(() => {
-            button.textContent = originalText;
-        }, 2000);
-    }).catch(err => console.error('Failed to copy:', err));
+// Authentication Actions
+
+// Redirect to Cognito login
+function login() {
+    const cognitoUrl = `https://${config.cognito.Domain}.auth.${config.cognito.Region}.amazoncognito.com`;
+    const params = new URLSearchParams({
+        client_id: config.cognito.ClientId,
+        response_type: 'token',
+        scope: 'email openid',
+        redirect_uri: config.cognito.RedirectUri,
+    });
+    window.location.href = `${cognitoUrl}/login?${params.toString()}`;
 }
 
-// Initialize app on load
+// Logout and clear session
+function logout() {
+    sessionStorage.removeItem('idToken');
+    const cognitoUrl = `https://${config.cognito.Domain}.auth.${config.cognito.Region}.amazoncognito.com`;
+    const params = new URLSearchParams({
+        client_id: config.cognito.ClientId,
+        logout_uri: config.cognito.RedirectUri,
+    });
+    window.location.href = `${cognitoUrl}/logout?${params.toString()}`;
+}
+
+// Initialize the application
+function initApp() {
+    idToken = getTokenFromUrl();
+    if (idToken && !isTokenExpired(idToken)) {
+        window.history.replaceState(null, null, window.location.pathname);
+        showServerControls();
+    } else {
+        showLoginButton();
+    }
+}
+
+// Initialize on load
 window.onload = initApp;
 
-// Export global functions
+// Export global functions for button interactions
 window.login = login;
 window.logout = logout;
 window.startServer = startServer;
 window.stopServer = stopServer;
-window.copyToClipboard = copyToClipboard;
