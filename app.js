@@ -91,17 +91,43 @@ function logout() {
     window.location.href = `${cognitoDomain}/logout?${queryParams.toString()}`;
 }
 
+async function refreshToken() {
+    const refreshToken = sessionStorage.getItem('refreshToken');
+    if (!refreshToken) return logout();
+
+    try {
+        const response = await fetch(`https://${config.cognito.Domain}.auth.${config.cognito.Region}.amazoncognito.com/oauth2/token`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+                grant_type: 'refresh_token',
+                client_id: config.cognito.ClientId,
+                refresh_token: refreshToken,
+            }),
+        });
+
+        if (!response.ok) throw new Error('Failed to refresh token');
+        const data = await response.json();
+        sessionStorage.setItem('idToken', data.id_token);
+        idToken = data.id_token;
+    } catch (error) {
+        console.error('Token refresh failed:', error.message);
+        logout();
+    }
+}
+
+
 // Make authenticated requests
 async function makeAuthenticatedRequest(endpoint, method = 'GET') {
     try {
-        if (!idToken) throw new Error('No authentication token found. Please login.');
+        if (!idToken) await refreshToken();
 
         const response = await fetch(`${config.api.baseUrl}${endpoint}`, {
             method: method,
             headers: {
                 Authorization: `Bearer ${idToken}`,
-                'Content-Type': 'application/json'
-            }
+                'Content-Type': 'application/json',
+            },
         });
 
         if (!response.ok) {
@@ -120,6 +146,7 @@ async function makeAuthenticatedRequest(endpoint, method = 'GET') {
         throw error;
     }
 }
+
 
 // Update server status
 async function updateServerStatus() {
