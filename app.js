@@ -2,7 +2,7 @@ import config from './config.js';
 
 let idToken = null;
 
-// Parse token from URL or sessionStorage
+// Helper: Parse token from URL or sessionStorage
 function getTokenFromUrl() {
     const hash = window.location.hash.substring(1);
     const params = new URLSearchParams(hash);
@@ -14,30 +14,36 @@ function getTokenFromUrl() {
     return sessionStorage.getItem('idToken');
 }
 
-// Check if the token is expired
+// Helper: Check if the token is expired
 function isTokenExpired(token) {
     try {
-        const [, payload] = token.split('.');
-        const { exp } = JSON.parse(atob(payload));
-        return Date.now() >= exp * 1000;
-    } catch {
-        return true; // Treat invalid token as expired
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        const currentTime = Math.floor(Date.now() / 1000);
+        return payload.exp <= currentTime;
+    } catch (error) {
+        console.error('Error decoding token:', error);
+        return true;
     }
 }
 
-// Initialize application
+// Initialize the app
 function initApp() {
+    console.log("Initializing app...");
     const token = getTokenFromUrl();
+    console.log("Retrieved token:", token);
+
     if (token && !isTokenExpired(token)) {
         idToken = token;
+        console.log("Token is valid.");
         window.history.replaceState(null, null, window.location.pathname); // Clean URL
         showServerControls();
     } else {
+        console.warn("Token missing or expired.");
         showLoginButton();
     }
 }
 
-// Show login button
+// Display login button
 function showLoginButton() {
     document.getElementById('content').innerHTML = `
         <div class="container mt-5 text-center">
@@ -48,13 +54,13 @@ function showLoginButton() {
     `;
 }
 
-// Show server controls
+// Display server controls
 async function showServerControls() {
     try {
-        // Get user info first
+        console.log("Fetching user info...");
         const userResponse = await makeAuthenticatedRequest('/user-info');
         const userData = await userResponse.json();
-
+        
         document.getElementById('content').innerHTML = `
             <div class="container mt-5">
                 <div class="d-flex justify-content-between align-items-center mb-4">
@@ -104,7 +110,7 @@ function login() {
         client_id: config.cognito.ClientId,
         response_type: config.cognito.ResponseType,
         scope: 'email openid',
-        redirect_uri: config.cognito.RedirectUri,
+        redirect_uri: config.cognito.RedirectUri
     });
     window.location.href = `${cognitoDomain}/login?${queryParams.toString()}`;
 }
@@ -116,26 +122,25 @@ function logout() {
     const cognitoDomain = `https://${config.cognito.Domain}.auth.${config.cognito.Region}.amazoncognito.com`;
     const queryParams = new URLSearchParams({
         client_id: config.cognito.ClientId,
-        logout_uri: config.cognito.RedirectUri,
+        logout_uri: config.cognito.RedirectUri
     });
     window.location.href = `${cognitoDomain}/logout?${queryParams.toString()}`;
 }
 
 // Make authenticated requests
 async function makeAuthenticatedRequest(endpoint, method = 'GET') {
+    console.log("Making authenticated request to:", endpoint);
     try {
         if (!idToken || isTokenExpired(idToken)) {
-            sessionStorage.removeItem('idToken');
-            showLoginButton();
             throw new Error('Authentication expired. Please login again.');
         }
 
         const response = await fetch(`${config.api.baseUrl}${endpoint}`, {
-            method,
+            method: method,
             headers: {
                 Authorization: `Bearer ${idToken}`,
-                'Content-Type': 'application/json',
-            },
+                'Content-Type': 'application/json'
+            }
         });
 
         if (!response.ok) {
@@ -145,7 +150,7 @@ async function makeAuthenticatedRequest(endpoint, method = 'GET') {
 
         return response;
     } catch (error) {
-        console.error(error.message);
+        console.error("Request failed:", error.message);
         throw error;
     }
 }
@@ -169,6 +174,36 @@ async function updateServerStatus() {
         document.getElementById('status-message').textContent = `Error: ${error.message}`;
         document.getElementById('start-btn').disabled = false;
         document.getElementById('stop-btn').disabled = true;
+    }
+}
+
+// Start server
+async function startServer() {
+    console.log("Start Server function called!");
+    try {
+        document.getElementById('start-btn').disabled = true;
+        document.getElementById('status-message').textContent = 'Starting server...';
+        await makeAuthenticatedRequest(config.api.endpoints.start, 'POST');
+        updateServerStatus();
+    } catch (error) {
+        console.error("Error starting server:", error);
+        document.getElementById('status-message').textContent = `Error: ${error.message}`;
+        document.getElementById('start-btn').disabled = false;
+    }
+}
+
+// Stop server
+async function stopServer() {
+    console.log("Stop Server function called!");
+    try {
+        document.getElementById('stop-btn').disabled = true;
+        document.getElementById('status-message').textContent = 'Stopping server...';
+        await makeAuthenticatedRequest(config.api.endpoints.stop, 'POST');
+        updateServerStatus();
+    } catch (error) {
+        console.error("Error stopping server:", error);
+        document.getElementById('status-message').textContent = `Error: ${error.message}`;
+        document.getElementById('stop-btn').disabled = false;
     }
 }
 
