@@ -1,15 +1,18 @@
 import config from './config.js';
 
 let idToken = null;
-let serverStarted = false; // Track if the server has been started
+let serverStarted = false;
 
 // Parse token from URL or sessionStorage
 function getTokenFromUrl() {
     const hash = window.location.hash.substring(1);
     const params = new URLSearchParams(hash);
     const token = params.get('id_token');
-    if (token) {
+    const refreshToken = params.get('refresh_token');
+
+    if (token && refreshToken) {
         sessionStorage.setItem('idToken', token);
+        sessionStorage.setItem('refreshToken', refreshToken);
         return token;
     }
     return sessionStorage.getItem('idToken');
@@ -82,6 +85,7 @@ function login() {
 // Handle logout
 function logout() {
     sessionStorage.removeItem('idToken');
+    sessionStorage.removeItem('refreshToken');
     idToken = null;
     const cognitoDomain = `https://${config.cognito.Domain}.auth.${config.cognito.Region}.amazoncognito.com`;
     const queryParams = new URLSearchParams({
@@ -91,9 +95,13 @@ function logout() {
     window.location.href = `${cognitoDomain}/logout?${queryParams.toString()}`;
 }
 
+// Refresh token
 async function refreshToken() {
     const refreshToken = sessionStorage.getItem('refreshToken');
-    if (!refreshToken) return logout();
+    if (!refreshToken) {
+        console.error('Refresh token missing. Logging out.');
+        return logout();
+    }
 
     try {
         const response = await fetch(`https://${config.cognito.Domain}.auth.${config.cognito.Region}.amazoncognito.com/oauth2/token`, {
@@ -106,7 +114,11 @@ async function refreshToken() {
             }),
         });
 
-        if (!response.ok) throw new Error('Failed to refresh token');
+        if (!response.ok) {
+            console.error('Failed to refresh token. Logging out.');
+            return logout();
+        }
+
         const data = await response.json();
         sessionStorage.setItem('idToken', data.id_token);
         idToken = data.id_token;
@@ -115,7 +127,6 @@ async function refreshToken() {
         logout();
     }
 }
-
 
 // Make authenticated requests
 async function makeAuthenticatedRequest(endpoint, method = 'GET') {
@@ -132,55 +143,49 @@ async function makeAuthenticatedRequest(endpoint, method = 'GET') {
 
         if (!response.ok) {
             if (response.status === 401) {
-                sessionStorage.removeItem('idToken');
-                showLoginButton();
-                throw new Error('Authentication expired. Please login again.');
+                console.error('Authentication expired. Logging out.');
+                logout();
             }
-            const errorText = await response.text();
-            throw new Error(`API Error: ${response.status} - ${errorText}`);
+            throw new Error(`API Error: ${response.status}`);
         }
 
         return await response.json();
     } catch (error) {
-        console.error(error.message);
+        console.error('Request failed:', error.message);
         throw error;
     }
 }
 
-
 // Update server status
 async function updateServerStatus() {
     try {
+        const statusMessage = document.getElementById('status-message');
+        const statusIndicator = document.getElementById('statusIndicator');
+        const ipAddress = document.getElementById('ip-address');
+
+        if (!statusMessage || !statusIndicator || !ipAddress) {
+            console.warn('DOM elements not ready for update.');
+            return;
+        }
+
         const result = await makeAuthenticatedRequest(config.api.endpoints.status);
-        document.getElementById('status-message').textContent = `Server is ${result.status}`;
-        document.getElementById('statusIndicator').className = `status-indicator ${result.status === 'RUNNING' ? 'status-running' : 'status-stopped'}`;
-        
-        // Update IP address display
-        document.getElementById('ip-address').innerHTML = result.ip_address
+        statusMessage.textContent = `Server is ${result.status}`;
+        statusIndicator.className = `status-indicator ${result.status === 'RUNNING' ? 'status-running' : 'status-stopped'}`;
+        ipAddress.innerHTML = result.ip_address
             ? `<div class="input-group">
                     <input type="text" class="form-control" value="${result.ip_address}:25565" readonly>
                     <button class="btn btn-outline-secondary" onclick="copyToClipboard('${result.ip_address}:25565')">Copy</button>
                </div>`
             : '';
 
-        // Enable/disable buttons based on server status
         document.getElementById('start-btn').disabled = result.status === 'RUNNING';
         document.getElementById('stop-btn').disabled = result.status !== 'RUNNING';
-        
-        // Enable delete button only if server has been started at least once
-        if (result.status === 'RUNNING') {
-            serverStarted = true; // Mark that the server has been started at least once
-            document.getElementById('delete-btn').disabled = false; // Enable delete button
-        } else if (serverStarted) {
-            document.getElementById('delete-btn').disabled = false; // Keep delete button enabled if server was started before
-        } else {
-            document.getElementById('delete-btn').disabled = true; // Disable delete button if never started
-        }
-
+        document.getElementById('delete-btn').disabled = !(serverStarted || result.status === 'RUNNING');
+        if (result.status === 'RUNNING') serverStarted = true;
     } catch (error) {
-        document.getElementById('status-message').textContent = `Error: ${error.message}`;
-        document.getElementById('start-btn').disabled = false;
-        document.getElementById('stop-btn').disabled = true;
+        console.error('Error updating status:', error.message);
+        const statusMessage = document.getElementById('status-message');
+        if (statusMessage) statusMessage.textContent = `Error: ${error.message}`;
     }
 }
 
@@ -189,13 +194,10 @@ async function startServer() {
     try {
         document.getElementById('start-btn').disabled = true;
         document.getElementById('status-message').textContent = 'Starting server...';
-        
         await makeAuthenticatedRequest(config.api.endpoints.start, 'POST');
-        
         updateServerStatus();
     } catch (error) {
-        document.getElementById('status-message').textContent = `Error: ${error.message}`;
-        document.getElementById('start-btn').disabled = false;
+        console.error('Error starting server:', error.message);
     }
 }
 
@@ -204,55 +206,34 @@ async function stopServer() {
     try {
         document.getElementById('stop-btn').disabled = true;
         document.getElementById('status-message').textContent = 'Stopping server...';
-        
         await makeAuthenticatedRequest(config.api.endpoints.stop, 'POST');
-        
         updateServerStatus();
     } catch (error) {
-        document.getElementById('status-message').textContent = `Error: ${error.message}`;
-        document.getElementById('stop-btn').disabled = false;
+        console.error('Error stopping server:', error.message);
     }
 }
 
 // Delete server
 async function deleteServer() {
     try {
-        const confirmDelete = confirm("Are you sure you want to delete the server?");
-        
-        if (confirmDelete) {
+        if (confirm('Are you sure you want to delete the server?')) {
             document.getElementById('delete-btn').disabled = true;
             document.getElementById('status-message').textContent = 'Deleting server...';
-            
-            await makeAuthenticatedRequest(config.api.endpoints.delete, 'DELETE'); // Make DELETE request
-            
-            // Reset UI after deletion
-            serverStarted = false; // Reset the flag as the server has been deleted
-            updateServerStatus(); // Refresh status after deletion
-            alert("Server deleted successfully.");
-            
-            // Optionally, disable delete button after deletion until next start.
-            document.getElementById('delete-btn').disabled = true; 
-            
-            // You might want to refresh or redirect here depending on your app's flow.
-            
-       }
-       
-   } catch (error) {
-       document.getElementById('status-message').textContent = `Error: ${error.message}`;
-       document.getElementById('delete-btn').disabled = false; 
-   }
+            await makeAuthenticatedRequest(config.api.endpoints.delete, 'DELETE');
+            alert('Server deleted successfully.');
+            serverStarted = false;
+            updateServerStatus();
+        }
+    } catch (error) {
+        console.error('Error deleting server:', error.message);
+    }
 }
 
 // Copy to clipboard
 function copyToClipboard(text) {
     navigator.clipboard.writeText(text).then(() => {
-         const button = document.querySelector('.input-group .btn');
-         const originalText = button.textContent;
-         button.textContent = 'Copied!';
-         setTimeout(() => {
-             button.textContent = originalText;
-         }, 2000);
-     }).catch(err => console.error('Failed to copy:', err));
+        alert('Copied to clipboard!');
+    }).catch(err => console.error('Failed to copy:', err));
 }
 
 // Initialize app on load
@@ -263,5 +244,5 @@ window.login = login;
 window.logout = logout;
 window.startServer = startServer;
 window.stopServer = stopServer;
-window.deleteServer = deleteServer; // Export delete function for global access
+window.deleteServer = deleteServer;
 window.copyToClipboard = copyToClipboard;
